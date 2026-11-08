@@ -2,6 +2,7 @@ import { subscribe } from './live.js';
 import { esc, num, pct, ago, scoreRow, rankRow, gradeBadge, avatarEl, danBadge, playerLink, snipeRow, mapRow, skillChips, SKILL_LABELS } from './ui.js';
 import { lineChart, barList, heatmap, PALETTE } from './charts.js';
 import { COUNTRY_CODES } from './countries.js';
+import { danFor, thresholds } from './dan.js';
 
 const app = document.getElementById('app');
 const countrySelect = document.getElementById('country');
@@ -416,7 +417,7 @@ const views = {
     document.title = 'How skills and dans are estimated · keyfeed';
     app.innerHTML = `<article class="card prose">
       <h1>How skills and dans are estimated</h1>
-      <p>keyfeed rates charts and players with its own transparent model (<code>kf1</code>). The numbers are estimates and get a <b>~</b> in front. The ladder has not been calibrated against real dan course results yet.</p>
+      <p>keyfeed rates charts and players with its own transparent model (<code>kf2</code>). The numbers are estimates and get a <b>~</b> in front.</p><p><b>How well it works:</b> on 84 popular ranked charts, keyfeed's rating order matches osu!'s star rating order closely (Spearman ρ ≈ 0.98 for 4K and 0.96 for 7K). The absolute dan ladder has not been calibrated against real dan course passes yet, so treat exact levels as approximate.</p>
       <h2>1. Every chart is analysed</h2>
       <p>When a tracked player sets a pp score, or a map or skills page is opened, keyfeed downloads the chart's <code>.osu</code> file and reads its notes. Notes are grouped into rows (chords), and each row gets a pattern label:</p>
       <ul>
@@ -425,7 +426,7 @@ const views = {
         <li><b>Stream</b>: a single note with no repeat.</li>
         <li><b>Jumpstream / Handstream</b>: chords of two notes up to half the keys, or more than half.</li>
       </ul>
-      <p>A 4-second window slides across the chart. In each window, each pattern's rating is note density × how much of the window is that pattern × a pattern weight (jacks count more per note than streams). A skillset's chart rating is the average of its hardest 10% of windows. <b>Tech</b> comes from rhythm changes, <b>Stamina</b> from the best sustained 60 seconds, and <b>LN</b> from hold coverage and off-beat releases. Units are effective notes per second, normalised so 4K and 7K are comparable.</p>
+      <p>A 4-second window slides across the chart. In each window, each pattern's rating is note density × how much of the window is that pattern × a pattern weight (jacks count more per note than streams). A skillset's chart rating is the average of its hardest 10% of windows. <b>Tech</b> comes from rhythm changes, <b>Stamina</b> from the best sustained 60 seconds, and <b>LN</b> from press-plus-release density (a release counts as half a press) scaled by how many columns are held at once. Units are effective notes per second, normalised so 4K and 7K are comparable.</p>
       <h2>2. Plays earn credit</h2>
       <p>credit = chart rating × rate (DT 1.5×, HT 0.75×) × accuracy factor. The accuracy factor is 1.0 at the bar (96%, or 95% on LN charts), grows slowly above it, and fades to 0 five points under it. A play counts toward every skillset that is at least 85% of the chart's strongest one.</p>
       <h2>3. Skillsets, overall and dan</h2>
@@ -442,23 +443,12 @@ const views = {
   },
 };
 
-// client copy of the ladder (matches server/skills.js)
-const LADDER = { start: 7.5, step: 1.5, names: ['1', '2', '3', '4', '5', '6', '7', '8', '9', '10', 'alpha', 'beta', 'gamma', 'delta', 'epsilon', 'zeta', 'eta'] };
-function danFor(rating, keys) {
-  if (!(rating > 0) || ![4, 7].includes(Number(keys))) return null;
-  if (rating < LADDER.start - LADDER.step) return null;
-  let i = Math.floor((rating - LADDER.start) / LADDER.step);
-  i = Math.max(0, Math.min(LADDER.names.length - 1, i));
-  const pos = (rating - (LADDER.start + i * LADDER.step)) / LADDER.step;
-  if (i === LADDER.names.length - 1 && pos >= 1) return { label: `>${LADDER.names[i]}`, level: LADDER.names[i] };
-  return { label: LADDER.names[i] + ['--', '-', '', '+', '++'][Math.max(0, Math.min(4, Math.floor(pos * 5)))], level: LADDER.names[i] };
-}
 function ladderTable() {
+  const t = thresholds(4);
+  const half = Math.ceil(t.length / 2);
+  const cell = (i) => (i < t.length ? `<td>${danBadge({ label: t[i].name, level: t[i].name })}</td><td class="num">${t[i].min.toFixed(1)}</td>` : '<td></td><td></td>');
   return `<table class="table"><thead><tr><th>Dan</th><th class="num">Overall from</th><th>Dan</th><th class="num">Overall from</th></tr></thead><tbody>${
-    Array.from({ length: Math.ceil(LADDER.names.length / 2) }, (_, r) => {
-      const cell = (i) => (i < LADDER.names.length ? `<td>${danBadge({ label: LADDER.names[i], level: LADDER.names[i] })}</td><td class="num">${(LADDER.start + i * LADDER.step).toFixed(1)}</td>` : '<td></td><td></td>');
-      return `<tr>${cell(r)}${cell(r + Math.ceil(LADDER.names.length / 2))}</tr>`;
-    }).join('')}</tbody></table>`;
+    Array.from({ length: half }, (_, r) => `<tr>${cell(r)}${cell(r + half)}</tr>`).join('')}</tbody></table>`;
 }
 
 async function renderSkills(body, user) {

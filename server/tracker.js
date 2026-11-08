@@ -107,18 +107,30 @@ export class Tracker extends EventEmitter {
     };
   }
 
+  /** When the chart model changes, re-queue analysed charts and drop skill caches built on the old model. */
+  ensureChartModel() {
+    if (this.meta('chart_model') === MODEL) return;
+    this.db.transaction(() => {
+      this.db.prepare(`UPDATE charts SET status = 'queued', json = NULL WHERE status IN ('done', 'error')`).run();
+      this.db.prepare(`DELETE FROM skill_cache`).run();
+      this.db.prepare(`DELETE FROM skill_history`).run();
+      this.setMeta('chart_model', MODEL);
+    });
+  }
+
   meta(key) { return this.q.getMeta.get(key)?.value ?? null; }
   setMeta(key, value) { this.q.setMeta.run(key, String(value)); }
 
   /** Wipe data if we switched between demo and real data (e.g. after adding osu! credentials). */
   ensureMode(mode) {
-    if (this.meta('mode') === mode) return;
+    if (this.meta('mode') === mode) { this.ensureChartModel(); return; }
     this.db.transaction(() => {
       for (const t of DATA_TABLES) this.db.prepare(`DELETE FROM ${t}`).run();
       this.db.prepare(`DELETE FROM meta WHERE key NOT IN ('schema_version')`).run();
       this.setMeta('mode', mode);
     });
     this.queue = [];
+    this.ensureChartModel();
   }
 
   // ---------- countries ----------

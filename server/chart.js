@@ -16,10 +16,12 @@
 //   4. Tech comes from rhythm irregularity, stamina from the best sustained 60 s,
 //      LN from hold coverage and release timing.
 
-export const MODEL = 'kf1';
+export const MODEL = 'kf2';
 export const SKILLSETS = ['stream', 'jumpstream', 'handstream', 'jack', 'chordjack', 'tech', 'stamina', 'ln'];
 
 const PATTERN_WEIGHT = { stream: 0.92, jumpstream: 1.0, handstream: 1.08, jack: 1.42, chordjack: 1.22 };
+// LN model constants, fitted on real ranked charts (see tools/validate-real-charts.mjs).
+export const LN_PARAMS = { release: 0.5, base: 0.9, coverage: 0.35, offbeat: 0.05 };
 const WINDOW_MS = 4000;
 const STEP_MS = 500;
 
@@ -124,12 +126,15 @@ export function analyzeChart(parsed) {
   const lnNotes = notes.filter((n) => n.end);
   const lnRatio = lnNotes.length / notes.length;
 
-  // per-window measurements (two pointers over rows)
+  // per-window measurements (two pointers over rows, and over LN releases)
+  const tails = lnNotes.map((n) => n.end).sort((a, b) => a - b);
   const windows = [];
-  let lo = 0, hi = 0;
+  let lo = 0, hi = 0, tlo = 0, thi = 0;
   for (let w = start; w <= end - WINDOW_MS / 2; w += STEP_MS) {
     while (lo < rows.length && rows[lo].t < w) lo++;
     while (hi < rows.length && rows[hi].t < w + WINDOW_MS) hi++;
+    while (tlo < tails.length && tails[tlo] < w) tlo++;
+    while (thi < tails.length && tails[thi] < w + WINDOW_MS) thi++;
     const count = { stream: 0, jumpstream: 0, handstream: 0, jack: 0, chordjack: 0 };
     let total = 0, irregular = 0, rowCount = 0;
     for (let i = lo; i < hi; i++) {
@@ -138,7 +143,13 @@ export function analyzeChart(parsed) {
       irregular += rows[i].irregular;
       rowCount++;
     }
-    windows.push({ nps: total / (WINDOW_MS / 1000) / norm, count, total, irregular: rowCount ? irregular / rowCount : 0 });
+    const releases = thi - tlo;
+    windows.push({
+      nps: total / (WINDOW_MS / 1000) / norm,
+      // presses plus weighted releases: the density an LN chart actually asks for
+      lnps: (total + LN_PARAMS.release * releases) / (WINDOW_MS / 1000) / norm,
+      count, total, irregular: rowCount ? irregular / rowCount : 0,
+    });
   }
   if (!windows.length) return null;
 
@@ -168,15 +179,16 @@ export function analyzeChart(parsed) {
   const lengthFactor = Math.min(1.15, Math.max(0.6, (lengthMs / 120000) ** 0.3));
   ratings.stamina = best * lengthFactor * 0.88;
 
-  // LN: hold coverage (how many columns are held on average) and releases off the beat
+  // LN: press+release density, scaled by hold coverage (how many columns are held at once)
+  // and how often releases land off the beat (not together with a press).
   if (lnRatio >= 0.15) {
     let heldTime = 0;
     for (const n of lnNotes) heldTime += n.end - n.t;
     const coverage = Math.min(1, heldTime / lengthMs / keys * 2.2);
     const pressTimes = new Set(rows.map((r) => Math.round(r.t / 5)));
     const offRelease = mean(lnNotes.map((n) => (pressTimes.has(Math.round(n.end / 5)) ? 0 : 1)));
-    const base = topMean(windows.map((w) => w.nps));
-    ratings.ln = base * (0.75 + 0.45 * coverage + 0.3 * offRelease) * Math.min(1, lnRatio / 0.5) ** 0.35;
+    const base = topMean(windows.map((w) => w.lnps));
+    ratings.ln = base * (LN_PARAMS.base + LN_PARAMS.coverage * coverage + LN_PARAMS.offbeat * offRelease) * Math.min(1, lnRatio / 0.4) ** 0.3;
   } else ratings.ln = 0;
 
   for (const k of SKILLSETS) ratings[k] = round2(ratings[k] || 0);

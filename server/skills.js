@@ -7,44 +7,18 @@
 //   overall         = 0.5·best + 0.3·second + 0.2·third skillset
 //   dan             = overall placed on the ladder below, in five steps per level (--, -, , +, ++)
 //
-// The ladder thresholds are an uncalibrated first pass in "effective 4K nps" units.
-// Tune them in LADDERS as real data comes in.
+// The ladder itself (thresholds and dan names) lives in web/js/dan.js so the browser uses the
+// exact same mapping.
 
 import { SKILLSETS, rateOf } from './chart.js';
+import { LADDERS, thresholds, danFor } from '../web/js/dan.js';
 
-const DAN_NAMES = ['1', '2', '3', '4', '5', '6', '7', '8', '9', '10', 'alpha', 'beta', 'gamma', 'delta', 'epsilon', 'zeta', 'eta'];
-
-export const LADDERS = {
-  4: { bar: 96, lnBar: 95, start: 7.5, step: 1.5 },
-  7: { bar: 96, lnBar: 95, start: 7.5, step: 1.5 },
-};
+export { LADDERS, thresholds, danFor };
 
 export const SKILL_LABELS = {
   stream: 'Stream', jumpstream: 'Jumpstream', handstream: 'Handstream', jack: 'Jack',
   chordjack: 'Chordjack', tech: 'Tech', stamina: 'Stamina', ln: 'LN',
 };
-
-export function thresholds(keys) {
-  const l = LADDERS[keys];
-  if (!l) return null;
-  return DAN_NAMES.map((name, i) => ({ name, min: Math.round((l.start + i * l.step) * 100) / 100 }));
-}
-
-/** Place a rating on the ladder. Returns { label, level, index } or null below 1st dan. */
-export function danFor(rating, keys) {
-  const t = thresholds(keys);
-  if (!t || !(rating > 0)) return null;
-  if (rating < t[0].min - LADDERS[keys].step) return null;
-  let i = t.findIndex((x, j) => rating >= x.min && (j === t.length - 1 || rating < t[j + 1].min));
-  if (i === -1) i = 0; // just under 1st: shows as 1--
-  const lo = t[i].min;
-  const width = LADDERS[keys].step;
-  const pos = (rating - lo) / width; // 0..1 within level (can be <0 just under 1st)
-  const beyond = i === t.length - 1 && pos >= 1;
-  const steps = ['--', '-', '', '+', '++'];
-  const s = steps[Math.max(0, Math.min(4, Math.floor(pos * 5)))];
-  return { label: beyond ? `>${t[i].name}` : `${t[i].name}${s}`, level: t[i].name, index: i, pos: Math.round(pos * 100) / 100 };
-}
 
 /** Accuracy (0–100) → credit multiplier. Full credit at the bar, small bonus above, fades to 0 five points under. */
 export function accuracyFactor(acc, bar) {

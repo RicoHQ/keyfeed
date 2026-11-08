@@ -200,3 +200,38 @@ test('social previews: valid PNG card and per-page meta', async () => {
   const html = injectMeta('<title>x</title><meta property="og:image" content="/api/og">', meta);
   assert.match(html, /https:\/\/kf\.test\/api\/og\?player=/);
 });
+
+test('dans: nothing below 1st dan, and server and browser share one ladder', async () => {
+  const shared = await import('../web/js/dan.js');
+  assert.equal(shared.danFor, danFor, 'server re-exports the browser module');
+  assert.equal(danFor(7.49, 4), null, 'below 1st dan → no dan');
+  assert.equal(danFor(7.5, 4).label, '1--');
+  assert.equal(danFor(7.5 + 1.5 * 0.5, 4).label, '1');
+  assert.equal(danFor(20, 6), null, 'no ladder for 6K');
+  // every level boundary lands on a plain "--" step of the next level
+  shared.thresholds(4).forEach((t, i) => assert.equal(danFor(t.min, 4).level, t.name, `level ${i}`));
+});
+
+test('chart analyzer: LN releases count, so an LN chart outrates its rice twin', () => {
+  const rice = makeOsu({ style: 'stream', nps: 12, seed: 4 });
+  // same presses, but every note becomes a hold that releases off-beat
+  const ln = rice.replace(/^(\d+),192,(\d+),1,0,0:0:0:0:$/gm, (_, x, t) => `${x},192,${t},128,0,${Number(t) + 137}:0:0:0:0:`);
+  const a = analyzeChart(parseOsu(rice));
+  const b = analyzeChart(parseOsu(ln));
+  assert.equal(a.ratings.ln, 0);
+  assert.ok(b.lnRatio > 0.9);
+  assert.ok(b.ratings.ln > a.ratings.stream, `ln ${b.ratings.ln} vs stream ${a.ratings.stream}`);
+  assert.equal(b.top[0], 'ln');
+});
+
+test('chart model change re-queues analysed charts and clears skill caches', async () => {
+  const { tracker } = setup();
+  for (let i = 0; i < 60; i++) await tracker.step();
+  while (await tracker.analyzeNext());
+  const done = tracker.db.prepare(`SELECT COUNT(*) AS n FROM charts WHERE status = 'done'`).get().n;
+  assert.ok(done > 0);
+  tracker.setMeta('chart_model', 'old');
+  tracker.ensureChartModel();
+  assert.equal(tracker.db.prepare(`SELECT COUNT(*) AS n FROM charts WHERE status = 'done'`).get().n, 0);
+  assert.equal(tracker.meta('chart_model'), 'kf2');
+});

@@ -33,6 +33,10 @@ To track real players:
 - **Any country on demand:** pick any country and its top `ON_DEMAND_ROSTER` players are polled while someone is viewing it (up to `MAX_ACTIVE_COUNTRIES` at once).
 - **Social previews:** generated 1200×630 PNG cards and per-page Open Graph tags for players and maps.
 
+## Skill analyzer accuracy
+
+`tools/validate-real-charts.mjs` checks the chart model against real ranked maps. On the last run (84 charts: 47 4K, 37 7K) the analyzer's rating order matched osu! star rating order with Spearman ρ = 0.98 for 4K and 0.96 for 7K. LN charts sat within about half a dan level of the rice trend (the LN constants in `server/chart.js` were fitted on that sample). The absolute dan ladder (`web/js/dan.js`) is still uncalibrated against real dan-course passes.
+
 ## How it works
 
 ```
@@ -83,7 +87,7 @@ The Node server is a single long-running process. Put it behind Caddy or nginx (
 ## Ideas not built yet
 
 - Snipes against *full* osu! country leaderboards. That needs an osu!supporter user token, so today's snipes only cover tracked players.
-- Calibrating the dan ladder against real dan-course passes (thresholds live in `server/skills.js`).
+- Calibrating the dan ladder against real dan-course passes (thresholds live in `web/js/dan.js`).
 - Replays and skins.
 
 ## Etiquette
