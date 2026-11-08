@@ -77,7 +77,7 @@ export default {
         const r = await trackerStub(env).fetch(new Request(`${url.origin}/api/meta?path=${encodeURIComponent(url.pathname)}`));
         meta = await r.json();
       } catch {}
-      if (!meta || typeof HTMLRewriter === 'undefined') return shell;
+      if (!meta?.title || typeof HTMLRewriter === 'undefined') return shell;
       const set = (attr, value) => ({ element: (el) => el.setAttribute(attr, value) });
       return new HTMLRewriter()
         .on('title', { element: (el) => el.setInnerContent(meta.title) })

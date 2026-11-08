@@ -13,7 +13,10 @@
   },
 
   "durable_objects": {
-    "bindings": [{ "name": "TRACKER", "class_name": "TrackerDO" }]
+    "bindings": [{ "name": "TRACKER", "class_name": "TrackerDO" }],
+    // The poller never idles, so a deferred update would always wait the full delay.
+    // All state lives in SQLite, so adopting new code immediately is safe.
+    "code_update_strategy": { "mode": "immediate" }
   },
   "migrations": [{ "tag": "v1", "new_sqlite_classes": ["TrackerDO"] }],
 
