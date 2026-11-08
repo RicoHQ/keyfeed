@@ -1,0 +1,36 @@
+{
+  "name": "keyfeed",
+  "main": "worker/index.js",
+  "compatibility_date": "2025-09-01",
+  "compatibility_flags": ["nodejs_compat"],
+
+  // Front end: served straight from web/. Unknown paths fall back to index.html (client-side router).
+  "assets": {
+    "directory": "./web",
+    "binding": "ASSETS",
+    "not_found_handling": "single-page-application",
+    "run_worker_first": ["/api/*"]
+  },
+
+  "durable_objects": {
+    "bindings": [{ "name": "TRACKER", "class_name": "TrackerDO" }]
+  },
+  "migrations": [{ "tag": "v1", "new_sqlite_classes": ["TrackerDO"] }],
+
+  // Re-arms the polling loop if it ever stops.
+  "triggers": { "crons": ["*/10 * * * *"] },
+
+  // Non-secret settings. Set OSU_CLIENT_ID and OSU_CLIENT_SECRET as *secrets* in the dashboard
+  // (Worker → Settings → Variables and Secrets). Without them the site runs on generated demo data.
+  "vars": {
+    "COUNTRIES": "US",
+    "ROSTER_SIZE": "100",
+    "REQUESTS_PER_MINUTE": "60",
+    "RANKINGS_REFRESH_MINUTES": "60",
+    "HOT_WINDOW_MINUTES": "120",
+    "COLD_EVERY": "4",
+    "RETENTION_DAYS": "35"
+  },
+
+  "observability": { "enabled": true }
+}

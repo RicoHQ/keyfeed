@@ -1,0 +1,15 @@
+{
+  "name": "keyfeed",
+  "private": true,
+  "version": "0.2.0",
+  "description": "Self-hosted osu!mania country tracker (rankings, live scores, top plays, player pages) built on the official osu! API v2. Runs on Node or Cloudflare Workers.",
+  "type": "module",
+  "engines": { "node": ">=22.5" },
+  "scripts": {
+    "start": "node --disable-warning=ExperimentalWarning server/index.js",
+    "mock": "MOCK=1 node --disable-warning=ExperimentalWarning server/index.js",
+    "test": "node --disable-warning=ExperimentalWarning --test test/*.test.js",
+    "cf:dev": "npx wrangler dev",
+    "deploy": "npx wrangler deploy"
+  }
+}
