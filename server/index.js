@@ -2,7 +2,7 @@
 import { createServer } from 'node:http';
 import { readFile, stat } from 'node:fs/promises';
 import { extname, join, normalize, resolve } from 'node:path';
-import { createApp } from './app.js';
+import { createApp, injectMeta } from './app.js';
 
 const WEB_DIR = resolve('web');
 const MIME = { '.html': 'text/html; charset=utf-8', '.js': 'text/javascript; charset=utf-8', '.css': 'text/css; charset=utf-8', '.svg': 'image/svg+xml', '.png': 'image/png', '.ico': 'image/x-icon' };
@@ -20,8 +20,11 @@ export function nodeHandler(app) {
     } catch (e) {
       response = new Response(JSON.stringify({ error: e.message }), { status: 500 });
     }
-    if (!response) return serveStatic(new URL(req.url, 'http://x').pathname, res);
-    res.writeHead(response.status, Object.fromEntries(response.headers));
+    if (!response) return serveStatic(new URL(req.url, 'http://x').pathname, res, app, `http://${req.headers.host || 'localhost'}`);
+    const headers = Object.fromEntries([...response.headers].filter(([k]) => k !== 'set-cookie'));
+    const cookies = response.headers.getSetCookie?.() || [];
+    if (cookies.length) headers['set-cookie'] = cookies;
+    res.writeHead(response.status, headers);
     if (!response.body || req.method === 'HEAD') return res.end();
     const reader = response.body.getReader();
     ac.signal.addEventListener('abort', () => reader.cancel().catch(() => {}));
@@ -36,7 +39,7 @@ export function nodeHandler(app) {
   };
 }
 
-async function serveStatic(path, res) {
+async function serveStatic(path, res, app, base) {
   let file;
   try { file = normalize(join(WEB_DIR, decodeURIComponent(path))); } catch { file = WEB_DIR; }
   if (!file.startsWith(WEB_DIR)) { res.writeHead(403); return res.end(); }
@@ -46,8 +49,9 @@ async function serveStatic(path, res) {
     file = join(WEB_DIR, 'index.html'); // SPA fallback
   }
   try {
-    const body = await readFile(file);
+    let body = await readFile(file);
     const ext = extname(file);
+    if (ext === '.html' && app?.metaFor) body = injectMeta(body.toString('utf8'), app.metaFor(path, base));
     res.writeHead(200, { 'Content-Type': MIME[ext] || 'application/octet-stream', 'Cache-Control': ext === '.html' ? 'no-cache' : 'public, max-age=300' });
     res.end(body);
   } catch {

@@ -63,10 +63,51 @@ export class OsuClient {
     return res.json();
   }
 
-  /** One page (50 players) of country mania pp rankings. */
-  async rankings(country, page = 1) {
-    const body = await this.get('/rankings/mania/performance', { country, 'cursor[page]': page });
+  /** One page (50 players) of mania pp rankings. country=null for global; variant '4k' | '7k' | null. */
+  async rankings(country, page = 1, variant = null) {
+    const body = await this.get('/rankings/mania/performance', { country: country || undefined, variant: variant || undefined, 'cursor[page]': page });
     return { ranking: (body?.ranking || []).map(normalizeStats), total: body?.total ?? 0 };
+  }
+
+  /** Raw .osu file for a beatmap (used by the chart analyzer). */
+  async beatmapFile(id) {
+    await this.limiter.take();
+    this.requestCount++;
+    const res = await this.fetch(`${BASE}/osu/${Number(id)}`, { headers: { Accept: 'text/plain' } });
+    if (res.status === 404) return null;
+    if (!res.ok) throw new Error(`osu! file ${id} → ${res.status}`);
+    return res.text();
+  }
+
+  async beatmap(id) {
+    const b = await this.get(`/beatmaps/${Number(id)}`);
+    return b ? normalizeBeatmap(b) : null;
+  }
+
+  // ---- user login (authorization code grant) ----
+
+  authorizeUrl(redirectUri, state) {
+    const u = new URL(`${BASE}/oauth/authorize`);
+    u.searchParams.set('client_id', this.clientId);
+    u.searchParams.set('redirect_uri', redirectUri);
+    u.searchParams.set('response_type', 'code');
+    u.searchParams.set('scope', 'identify public');
+    u.searchParams.set('state', state);
+    return u.toString();
+  }
+
+  /** Exchange an authorization code and return the signed-in user's profile. The user token is not kept. */
+  async loginWithCode(code, redirectUri) {
+    const res = await this.fetch(`${BASE}/oauth/token`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
+      body: JSON.stringify({ client_id: Number(this.clientId), client_secret: this.clientSecret, code, grant_type: 'authorization_code', redirect_uri: redirectUri }),
+    });
+    if (!res.ok) throw new Error(`osu! login failed: ${res.status}`);
+    const { access_token } = await res.json();
+    const me = await this.fetch(`${BASE}/api/v2/me/mania`, { headers: { Authorization: `Bearer ${access_token}`, Accept: 'application/json', 'x-api-version': API_VERSION } });
+    if (!me.ok) throw new Error(`osu! /me failed: ${me.status}`);
+    return normalizeUser(await me.json());
   }
 
   async recentScores(userId, limit = 50) {
@@ -125,6 +166,8 @@ export function normalizeUser(u) {
     ...normalizeUserLite(u),
     join_date: u.join_date,
     is_online: u.is_online,
+    rank_history: u.rank_history?.data || u.rankHistory?.data || [],
+    rank_highest: u.rank_highest || null,
     stats: {
       pp: s.pp,
       pp_4k: variantPP(s, '4k'),
@@ -178,5 +221,23 @@ export function normalizeScore(s) {
       card: bs.covers?.card || null,
     },
     user: normalizeUserLite(s.user),
+  };
+}
+
+export function normalizeBeatmap(b) {
+  const bs = b.beatmapset || {};
+  return {
+    id: b.id,
+    set_id: b.beatmapset_id ?? bs.id,
+    title: bs.title,
+    artist: bs.artist,
+    version: b.version,
+    creator: bs.creator,
+    keys: b.cs,
+    sr: b.difficulty_rating,
+    bpm: b.bpm,
+    status: b.status,
+    cover: bs.covers?.['cover@2x'] || bs.covers?.cover || null,
+    url: b.url || `https://osu.ppy.sh/beatmaps/${b.id}`,
   };
 }

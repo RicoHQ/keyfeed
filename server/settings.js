@@ -26,5 +26,18 @@ export function makeConfig(env = {}, { autoMock = false } = {}) {
     coldEvery: int(env.COLD_EVERY, 4),
     // Scores older than this are deleted to keep storage bounded.
     retentionDays: int(env.RETENTION_DAYS, 35),
+    // Countries outside COUNTRIES are tracked on demand while someone is viewing them.
+    onDemandRoster: int(env.ON_DEMAND_ROSTER, 50),
+    activeTtlMinutes: int(env.ACTIVE_TTL_MINUTES, 30),
+    maxActiveCountries: int(env.MAX_ACTIVE_COUNTRIES, 4),
+    leaderboardTtlMinutes: int(env.LEADERBOARD_TTL_MINUTES, 60),
+    // 1 in N tracker steps downloads and analyses a chart for the skill analyzer.
+    analyzeEvery: int(env.ANALYZE_EVERY, 3),
+    // Players tracked outside rosters (signed-in users and who they follow).
+    maxPinned: int(env.MAX_PINNED, 300),
+    // Signs login cookies. Falls back to a key derived from the osu! client secret.
+    sessionSecret: env.SESSION_SECRET || '',
+    // Public origin used for OAuth redirects and share links (defaults to the request's origin).
+    publicUrl: env.PUBLIC_URL || '',
   };
 }

@@ -113,14 +113,14 @@ test('tracker: roster, silent backfill, then live events with dedupe', async () 
 test('HTTP API: rankings, feed, players, SSE hello, 404s', async () => {
   const { tracker, osu } = makeTracker();
   await tracker.refreshRankings('US');
-  const app = createApp({ tracker, osu, cfg: { countries: ['US'], mock: true, rosterSize: 50 } });
+  const app = createApp({ tracker, osu, cfg: { countries: ['US'], mock: true, rosterSize: 50, onDemandRoster: 50 } });
   const server = createServer(nodeHandler(app));
   await new Promise((r) => server.listen(0, r));
   const base = `http://127.0.0.1:${server.address().port}`;
   try {
-    const rank = await (await fetch(`${base}/api/rankings?country=US&pageSize=5`)).json();
-    assert.equal(rank.ranking.length, 5);
-    assert.equal((await fetch(`${base}/api/rankings?country=ZZ`)).status, 404);
+    const rank = await (await fetch(`${base}/api/rankings?country=US`)).json();
+    assert.equal(rank.ranking.length, 50);
+    assert.equal((await fetch(`${base}/api/rankings?country=ZZ`)).status, 400);
     assert.equal((await fetch(`${base}/api/tracker?country=US`)).status, 200);
     assert.equal((await fetch(`${base}/api/top-plays?country=US&window=24h`)).status, 200);
 

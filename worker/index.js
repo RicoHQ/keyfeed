@@ -68,6 +68,26 @@ export default {
   async fetch(request, env) {
     const url = new URL(request.url);
     if (url.pathname.startsWith('/api/')) return trackerStub(env).fetch(request);
+    // Player and map pages: serve the SPA shell with per-page meta tags so link previews work.
+    if ((url.pathname === '/' || /^\/(player|maps)\//.test(url.pathname)) && request.method === 'GET') {
+      // assets serve index.html at "/" ("/index.html" would redirect)
+      const shell = await env.ASSETS.fetch(new Request(new URL('/', url), { headers: request.headers }));
+      let meta = null;
+      try {
+        const r = await trackerStub(env).fetch(new Request(`${url.origin}/api/meta?path=${encodeURIComponent(url.pathname)}`));
+        meta = await r.json();
+      } catch {}
+      if (!meta || typeof HTMLRewriter === 'undefined') return shell;
+      const set = (attr, value) => ({ element: (el) => el.setAttribute(attr, value) });
+      return new HTMLRewriter()
+        .on('title', { element: (el) => el.setInnerContent(meta.title) })
+        .on('meta[property="og:title"]', set('content', meta.title))
+        .on('meta[name="description"]', set('content', meta.description))
+        .on('meta[property="og:description"]', set('content', meta.description))
+        .on('meta[property="og:image"]', set('content', meta.image))
+        .on('meta[name="twitter:image"]', set('content', meta.image))
+        .transform(shell);
+    }
     return env.ASSETS.fetch(request);
   },
 

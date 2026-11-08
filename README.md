@@ -11,7 +11,7 @@ It runs in two places, with no npm dependencies in either:
 
 ```bash
 npm run mock          # demo with generated data, no osu! account needed → http://localhost:3000
-npm test              # 14 tests: pp weighting, rate limiter, tracker, HTTP API, Durable Object harness
+npm test              # 24 tests: analyzer, dans, skills, snipes, maps, leaderboards, login, previews, Durable Object harness
 ```
 
 To track real players:
@@ -19,6 +19,19 @@ To track real players:
 1. Create an OAuth application at **osu.ppy.sh → Settings → OAuth → New OAuth Application**. Any callback URL works, because client credentials don't use it.
 2. `cp .env.example .env` and fill in `OSU_CLIENT_ID` / `OSU_CLIENT_SECRET`.
 3. `npm start`
+
+## Features
+
+- **Rankings:** per country (with ▲/▼ daily changes), global, and 4K / 7K variants, plus skill-rating leaderboards.
+- **Live feed:** new passes appear instantly over SSE, with one connection per browser shared across tabs.
+- **Top plays:** new top-100 plays with exact pp gain.
+- **Snipes:** a feed of tracked players taking #1 from each other, a board of who holds the most #1s, plus top snipers and most-sniped players.
+- **Maps:** most-played maps per country, and a page per map with chart analysis, tracked leaderboard, recent plays and snipes.
+- **Skill analyzer:** every chart gets per-skillset ratings (stream, jumpstream, handstream, jack, chordjack, tech, stamina, LN) and an estimated dan. Players get skillset ratings, a 4K / 7K dan and a daily skill history. See `/dan-estimates` on the site or `server/chart.js` and `server/skills.js`.
+- **Player pages:** 90-day global rank chart, pp history, key split, activity heatmap, tracked recents and best plays, with an accent colour taken from the avatar.
+- **osu! login:** sign in with osu! (OAuth). Signed-in users are tracked automatically and can follow players, who then get tracked too, and see a feed of their scores.
+- **Any country on demand:** pick any country and its top `ON_DEMAND_ROSTER` players are polled while someone is viewing it (up to `MAX_ACTIVE_COUNTRIES` at once).
+- **Social previews:** generated 1200×630 PNG cards and per-page Open Graph tags for players and maps.
 
 ## How it works
 
@@ -57,7 +70,8 @@ Code lives in `worker/index.js` and `wrangler.jsonc`. The tracker, API and SQL a
 
 1. **Connect the repo:** in the Cloudflare dashboard, go to **Workers & Pages → Create → Import a repository** and pick this repo. Leave the build command empty. The deploy command is `npx wrangler deploy`. After that, every push to `main` deploys.
    You can also deploy from your own machine with `npx wrangler login && npx wrangler deploy`.
-2. **Add osu! credentials:** go to **Worker → Settings → Variables and Secrets** and add `OSU_CLIENT_ID` and `OSU_CLIENT_SECRET` as **Secrets**. Without them the site runs on generated demo data. When you add them, the demo data is wiped and real tracking starts.
+2. **Add osu! credentials:** go to **Worker → Settings → Variables and Secrets** and add `OSU_CLIENT_ID`, `OSU_CLIENT_SECRET` and `SESSION_SECRET` (any long random string) as **Secrets**. Without them the site runs on generated demo data, and sign-in becomes a demo sign-in. When you add them, the demo data is wiped and real tracking starts.
+   For **osu! login**, set the OAuth app's *Application Callback URL* (osu! settings → OAuth) to `https://<your-worker>.workers.dev/api/auth/callback`.
 3. **Pick countries:** edit `vars` in `wrangler.jsonc` (`COUNTRIES`, `ROSTER_SIZE`, …) and push.
 
 **Free plan budget.** One always-on Durable Object at 128 MB uses about 11k of the 13k GB-s you get per day. Writes are kept low: one country with a 100-player roster comes to roughly 20k–30k of the 100k rows written per day. Each alarm run makes at most 40 osu! requests (the limit is 50 subrequests per invocation). For several large countries, use Workers Paid ($5/mo).
@@ -66,12 +80,11 @@ Code lives in `worker/index.js` and `wrangler.jsonc`. The tracker, API and SQL a
 
 The Node server is a single long-running process. Put it behind Caddy or nginx (turn off proxy buffering for `/api/live`) and keep `data/` on a persistent disk.
 
-## Not yet built (ideas from the teardown)
+## Ideas not built yet
 
-- **Snipes:** country beatmap leaderboards need a *user* token with osu!supporter. Add the authorization-code flow and watch the leaderboards of maps your roster plays.
-- **osu! login** (`/oauth/authorize`) for personal settings.
-- **Lazy per-country activation:** only poll countries someone is viewing.
-- Avatar accent colours, an OG image endpoint, replays.
+- Snipes against *full* osu! country leaderboards. That needs an osu!supporter user token, so today's snipes only cover tracked players.
+- Calibrating the dan ladder against real dan-course passes (thresholds live in `server/skills.js`).
+- Replays and skins.
 
 ## Etiquette
 

@@ -3,7 +3,7 @@
 // events to the other tabs over a BroadcastChannel. When the leader closes, another tab
 // acquires the lock and reconnects. Falls back to a plain EventSource per tab.
 
-const EVENTS = ['hello', 'tracker_score', 'top_play', 'rankings'];
+const EVENTS = ['hello', 'tracker_score', 'top_play', 'snipe', 'rankings'];
 const listeners = new Map(); // country -> Set<fn>
 const conns = new Map(); // country -> { close }
 

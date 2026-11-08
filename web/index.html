@@ -6,7 +6,14 @@
   <meta name="color-scheme" content="dark light">
   <meta name="theme-color" content="#11161c">
   <title>keyfeed · osu!mania tracker</title>
-  <meta name="description" content="Live osu!mania scores, country rankings and top plays.">
+  <meta name="description" content="Live osu!mania scores, country rankings, snipes, map stats and a skill analyzer.">
+  <meta property="og:type" content="website">
+  <meta property="og:site_name" content="keyfeed">
+  <meta property="og:title" content="keyfeed · osu!mania tracker">
+  <meta property="og:description" content="Live osu!mania scores, country rankings, snipes, map stats and a skill analyzer.">
+  <meta property="og:image" content="/api/og">
+  <meta name="twitter:card" content="summary_large_image">
+  <meta name="twitter:image" content="/api/og">
   <link rel="icon" href="/favicon.svg" type="image/svg+xml">
   <link rel="stylesheet" href="/styles.css">
 </head>
@@ -22,19 +29,22 @@
         <a href="/rankings" data-link data-nav="rankings">Rankings</a>
         <a href="/tracker" data-link data-nav="tracker">Live</a>
         <a href="/top-plays" data-link data-nav="top-plays">Top plays</a>
+        <a href="/snipes" data-link data-nav="snipes">Snipes</a>
+        <a href="/maps" data-link data-nav="maps">Maps</a>
       </nav>
       <div class="topbar-right">
         <form class="search" id="search" role="search">
           <input name="q" placeholder="Player…" aria-label="Find a player" autocomplete="off">
         </form>
         <select id="country" aria-label="Country"></select>
+        <div id="auth" class="auth"></div>
       </div>
     </div>
   </header>
   <div id="banner" class="banner" hidden></div>
   <main id="app" class="container" aria-live="polite"></main>
   <footer class="footer container">
-    Data from the <a href="https://osu.ppy.sh/docs/" rel="noopener">osu! API v2</a>. Not affiliated with ppy or osu!.
+    <span>Data from the <a href="https://osu.ppy.sh/docs/" rel="noopener">osu! API v2</a>. Not affiliated with ppy or osu!. <a href="/dan-estimates" data-link>How skills and dans are estimated</a></span>
     <span id="status"></span>
   </footer>
   <script type="module" src="/js/app.js"></script>

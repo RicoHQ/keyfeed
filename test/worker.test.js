@@ -48,10 +48,10 @@ test('TrackerDO: boots in demo mode, arms alarm, alarm does work, API answers', 
   obj.osu.delayMs = 0; // speed up the fake API for the test
   await obj.alarm();
   await obj.alarm();
-  const r = await (await obj.fetch(new Request('https://x/api/rankings?country=US&pageSize=5'))).json();
-  assert.equal(r.ranking.length, 5);
-  const de = await (await obj.fetch(new Request('https://x/api/rankings?country=DE&pageSize=5'))).json();
-  assert.equal(de.ranking.length, 5);
+  const r = await (await obj.fetch(new Request('https://x/api/rankings?country=US'))).json();
+  assert.equal(r.ranking.length, 50);
+  const de = await (await obj.fetch(new Request('https://x/api/rankings?country=DE'))).json();
+  assert.equal(de.ranking.length, 50);
 
   for (let i = 0; i < 8; i++) await obj.alarm();
   const feed = await (await obj.fetch(new Request('https://x/api/tracker?country=US'))).json();
@@ -103,9 +103,13 @@ test('Worker: /api/* goes to the Durable Object, everything else to assets', asy
     ASSETS: { fetch: async (r) => { seen.push(['assets', new URL(r.url).pathname]); return new Response('asset'); } },
   };
   assert.equal(await (await worker.fetch(new Request('https://k/api/rankings'), fakeEnv)).text(), 'do');
-  assert.equal(await (await worker.fetch(new Request('https://k/player/abc'), fakeEnv)).text(), 'asset');
+  assert.equal(await (await worker.fetch(new Request('https://k/styles.css'), fakeEnv)).text(), 'asset');
   const waits = [];
   await worker.scheduled({}, fakeEnv, { waitUntil: (p) => waits.push(p) });
   await Promise.all(waits);
   assert.deepEqual(seen.map((s) => s[0]), ['do', 'assets', 'do']);
+  // player pages: SPA shell + meta lookup in the DO (HTMLRewriter is absent in Node, so the shell is returned as-is)
+  seen.length = 0;
+  assert.equal(await (await worker.fetch(new Request('https://k/player/abc'), fakeEnv)).text(), 'asset');
+  assert.deepEqual(seen, [['assets', '/'], ['do', '/api/meta']]);
 });

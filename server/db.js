@@ -3,7 +3,7 @@
 import { DatabaseSync } from 'node:sqlite';
 import { mkdirSync } from 'node:fs';
 import { dirname } from 'node:path';
-import { SCHEMA } from './schema.js';
+import { applySchema } from './schema.js';
 
 export { today } from './schema.js';
 
@@ -11,7 +11,7 @@ export function openDb(path) {
   if (path !== ':memory:') mkdirSync(dirname(path), { recursive: true });
   const raw = new DatabaseSync(path);
   if (path !== ':memory:') raw.exec('PRAGMA journal_mode = WAL; PRAGMA synchronous = NORMAL;');
-  for (const stmt of SCHEMA) raw.exec(stmt);
+  applySchema((sql, ...a) => raw.prepare(sql).run(...a), (sql, ...a) => raw.prepare(sql).get(...a));
 
   const clean = (args) => args.map((a) => (a === undefined ? null : a && typeof a === 'object' && !Array.isArray(a)
     ? Object.fromEntries(Object.entries(a).map(([k, v]) => [k, v === undefined ? null : v]))

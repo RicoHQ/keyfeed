@@ -1,11 +1,11 @@
 // Cloudflare Durable Object storage adapter: wraps ctx.storage.sql in the same interface
 // the tracker uses with node:sqlite. Named params (:name with an object argument) are
 // rewritten to positional `?` because the DO SQL API only takes positional bindings.
-import { SCHEMA } from './schema.js';
+import { applySchema } from './schema.js';
 
 export function openDoDb(storage) {
   const sql = storage.sql;
-  for (const stmt of SCHEMA) sql.exec(stmt);
+  applySchema((q, ...a) => { sql.exec(q, ...a); }, (q, ...a) => sql.exec(q, ...a).toArray()[0]);
 
   const val = (v) => (v === undefined ? null : typeof v === 'boolean' ? Number(v) : v);
 

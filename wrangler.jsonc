@@ -9,7 +9,7 @@
     "directory": "./web",
     "binding": "ASSETS",
     "not_found_handling": "single-page-application",
-    "run_worker_first": ["/api/*"]
+    "run_worker_first": ["/", "/api/*", "/player/*", "/maps/*"]
   },
 
   "durable_objects": {
@@ -20,7 +20,7 @@
   // Re-arms the polling loop if it ever stops.
   "triggers": { "crons": ["*/10 * * * *"] },
 
-  // Non-secret settings. Set OSU_CLIENT_ID and OSU_CLIENT_SECRET as *secrets* in the dashboard
+  // Non-secret settings. Set OSU_CLIENT_ID, OSU_CLIENT_SECRET and SESSION_SECRET as *secrets* in the dashboard
   // (Worker → Settings → Variables and Secrets). Without them the site runs on generated demo data.
   "vars": {
     "COUNTRIES": "US",
@@ -29,7 +29,12 @@
     "RANKINGS_REFRESH_MINUTES": "60",
     "HOT_WINDOW_MINUTES": "120",
     "COLD_EVERY": "4",
-    "RETENTION_DAYS": "35"
+    "RETENTION_DAYS": "35",
+    "ON_DEMAND_ROSTER": "50",
+    "ACTIVE_TTL_MINUTES": "30",
+    "MAX_ACTIVE_COUNTRIES": "4",
+    "ANALYZE_EVERY": "3",
+    "MAX_PINNED": "300"
   },
 
   "observability": { "enabled": true }
