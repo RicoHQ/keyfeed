@@ -143,7 +143,7 @@ const views = {
       const t = setTimeout(() => { if (location.pathname === '/') route(); }, 5000);
       cleanup.push(() => clearTimeout(t));
     }
-    $('home-top').innerHTML = top.status === 'fulfilled' ? renderTopHome(top.value.plays) : errorBox(top.reason);
+    $('home-top').innerHTML = top.status === 'fulfilled' ? renderTopHome(top.value.plays.length ? top.value.plays : (top.value.highest || []).slice(0, 5)) : errorBox(top.reason);
     $('home-feed').innerHTML = feed.status === 'fulfilled'
       ? (feed.value.scores.map((s) => scoreRow(s)).join('') || '<div class="empty">Waiting for the first scores. New plays show up here as they\'re set.</div>') : errorBox(feed.reason);
     $('home-snipes').innerHTML = sn.status === 'fulfilled'
@@ -239,11 +239,18 @@ const views = {
     const w = ['24h', '7d', '30d'].includes(params().get('window')) ? params().get('window') : '7d';
     app.innerHTML = `<h1 class="page-title">Top plays <small>${countryTitle(c)}</small></h1>
       ${tabs(['24h', '7d', '30d'].map((x) => [x, x, withCountry(`/top-plays?window=${x}`)]), w)}
-      ${card('New personal bests, by pp', skeleton(8), null, { id: 'top', live: true })}`;
+      <div class="grid">
+        ${card('New personal bests (tracked players)', skeleton(8), null, { id: 'top', live: true })}
+        ${card('Highest pp · last 24h · everyone', skeleton(8), null, { id: 'top-all' })}
+      </div>`;
     const el = document.getElementById('top');
+    const elAll = document.getElementById('top-all');
     const load = async () => {
       const r = await api(withCountry(`/api/top-plays?window=${w}&limit=100`));
       el.innerHTML = r.plays.map((s, i) => scoreRow(s, { index: i + 1 })).join('') || '<div class="empty">No new top-100 plays in this window yet.</div>';
+      elAll.innerHTML = cfg.ingest === 'firehose'
+        ? (r.highest || []).map((s, i) => scoreRow(s, { index: i + 1 })).join('') || '<div class="empty">No pp plays from this country seen in the last 24 hours yet.</div>'
+        : '<div class="empty">Needs the global score feed (INGEST=firehose).</div>';
     };
     try { await load(); } catch (e) { el.innerHTML = errorBox(e); }
     onLive(c, (type) => { if (type === 'top_play') load().catch(() => {}); });
@@ -401,6 +408,38 @@ const views = {
       </div>`;
   },
 
+  async world() {
+    document.title = 'World · keyfeed';
+    if (cfg.ingest !== 'firehose') { app.innerHTML = '<div class="card"><div class="empty">The world view needs the global score feed (INGEST=firehose).</div></div>'; return; }
+    app.innerHTML = `<h1 class="page-title">🌍 World <small>every osu!mania pass, live</small></h1>
+      <p class="note">Every country is followed through osu!'s global score feed. Countries marked <span class="chip">tracked</span> also get rankings, pp gain, snipes and history; open any country to start tracking it.</p>
+      <div class="grid">
+        ${card('Countries · last 24h', skeleton(10), null, { id: 'countries' })}
+        ${card('Live, worldwide', skeleton(10), null, { id: 'world-feed', live: true })}
+      </div>`;
+    const render = (r) => {
+      const tracked = new Set(r.tracked);
+      document.getElementById('countries').innerHTML = r.countries.length ? `
+        <div class="table-wrap"><table class="table">
+          <thead><tr><th>Country</th><th class="num">Plays 24h</th><th class="num">This hour</th><th class="num hide-sm">Top pp</th></tr></thead>
+          <tbody>${r.countries.slice(0, 120).map((c) => `
+            <tr><td><a class="player" href="/?country=${c.country}" data-link>${flag(c.country)} <span class="name">${esc(regionName(c.country))}</span>${tracked.has(c.country) ? ' <span class="chip">tracked</span>' : ''}</a></td>
+              <td class="num">${num(c.plays24h)}</td><td class="num">${num(c.playsHour)}</td>
+              <td class="num hide-sm">${c.topPP ? num(c.topPP) + '<small>pp</small>' : '–'}</td></tr>`).join('')}</tbody>
+        </table></div>` : '<div class="empty">Waiting for the first scores from the feed…</div>';
+    };
+    try {
+      const r = await api('/api/world?limit=40');
+      document.getElementById('world-feed').innerHTML = r.scores.map((x) => scoreRow(x)).join('') || '<div class="empty">Waiting for scores…</div>';
+      render(r);
+    } catch (e) { document.getElementById('world-feed').innerHTML = errorBox(e); }
+    const t = setInterval(() => api('/api/countries/live').then(render).catch(() => {}), 30000);
+    cleanup.push(() => clearInterval(t));
+    onLive('WORLD', (type, data) => {
+      if (type === 'tracker_score') prepend(document.getElementById('world-feed'), scoreRow(data, { flash: true }), data.id, 60);
+    });
+  },
+
   async following() {
     if (!me) { app.innerHTML = `<div class="card"><div class="empty">Sign in to follow players. ${loginLink('Sign in with osu!')}</div></div>`; return; }
     app.innerHTML = `<h1 class="page-title">Following</h1><div class="grid">${card('Players', skeleton(4), null, { id: 'fl' })}${card('Their latest scores', skeleton(8), null, { id: 'ff' })}</div>`;
@@ -549,7 +588,7 @@ function route() {
   document.querySelectorAll('details.menu[open]').forEach((d) => d.removeAttribute('open'));
   const path = location.pathname.replace(/\/+$/, '') || '/';
   let key = 'notFound', args = [];
-  const simple = { '/': 'home', '/rankings': 'rankings', '/tracker': 'tracker', '/top-plays': 'top-plays', '/snipes': 'snipes', '/maps': 'maps', '/following': 'following', '/dan-estimates': 'dan-estimates' };
+  const simple = { '/': 'home', '/world': 'world', '/rankings': 'rankings', '/tracker': 'tracker', '/top-plays': 'top-plays', '/snipes': 'snipes', '/maps': 'maps', '/following': 'following', '/dan-estimates': 'dan-estimates' };
   let m;
   if (simple[path]) key = simple[path];
   else if ((m = path.match(/^\/maps\/(\d+)$/))) { key = 'map'; args = [m[1]]; }
@@ -614,7 +653,7 @@ document.getElementById('search').addEventListener('submit', (e) => {
   alertBanner(flags.map(esc).join('<br>'));
   route();
   const statusEl = document.getElementById('status');
-  const refreshStatus = () => api('/api/status').then((s) => { statusEl.textContent = `${num(s.players)} players · ${num(s.scores)} scores · ${num(s.charts)} charts analysed`; }).catch(() => {});
+  const refreshStatus = () => api('/api/status').then((s) => { statusEl.textContent = `${s.feed ? `${num(s.feed.countriesLive)} countries live · ` : ''}${num(s.players)} tracked players · ${num(s.scores)} scores stored · ${num(s.charts)} charts analysed`; }).catch(() => {});
   refreshStatus();
   setInterval(refreshStatus, 30000);
   setInterval(() => document.querySelectorAll('[data-ago]').forEach((el) => { el.textContent = ago(el.dataset.ago); }), 15000);

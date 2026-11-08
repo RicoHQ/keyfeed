@@ -9,6 +9,7 @@ import { today, DATA_TABLES } from './schema.js';
 import { evaluateScore, mergeBest } from './pp.js';
 import { parseOsu, analyzeChart, MODEL } from './chart.js';
 import { computeSkills } from './skills.js';
+import { Firehose } from './firehose.js';
 
 const DAY = 86_400_000;
 
@@ -29,6 +30,9 @@ export class Tracker extends EventEmitter {
     this.pendingLeaderboards = new Set();
     this.touched = new Map();
     this.prepare();
+    this.firehose = this.config.ingest === 'firehose'
+      ? new Firehose(this, { feedIntervalMs: (this.config.feedIntervalSeconds ?? 20) * 1000 })
+      : null;
   }
 
   prepare() {
@@ -188,6 +192,7 @@ export class Tracker extends EventEmitter {
       this.q.pruneHistory.run(today(started - 120 * DAY));
       this.setMeta(`rankings:${country}`, started);
     });
+    this.firehose?.refreshFocus(true);
     this.log.info?.(`[rankings] ${country}: ${Math.min(rows.length, size)} players`);
     this.emit('rankings', { country });
   }
@@ -271,44 +276,54 @@ export class Tracker extends EventEmitter {
     return snipe;
   }
 
-  /** Poll one player's recent scores. Returns the number of new scores. */
+  /**
+   * Store and announce one new score for a tracked player: pp gain / top play, map leaderboard,
+   * snipe detection. Shared by per-player polling and the global score feed.
+   * opts.silent: backfill, don't announce. opts.announceScore: emit the plain 'score' event
+   * (the global feed announces every score itself, so it passes false).
+   */
+  async processScore(player, s, { silent = false, announceScore = true, now = Date.now() } = {}) {
+    if (s.passed === false || this.q.scoreExists.get(s.id)) return null;
+    const endedAt = Date.parse(s.ended_at) || now;
+    let ev = { position: -1, weightedPP: 0, ppGain: 0 };
+    if (!silent && s.pp > 0) {
+      const best = await this.ensureBest(player);
+      ev = evaluateScore(best, s);
+      if (ev.position >= 0) {
+        for (const b of mergeBest(best, s)) {
+          if (b.beatmap_id === s.beatmap_id) this.q.insertBest.run(player.id, s.beatmap_id, s.pp, s.accuracy, JSON.stringify(s.mods || []), endedAt);
+        }
+      }
+    }
+    const enriched = { ...s, pp_gain: ev.ppGain, weighted_pp: ev.weightedPP, best_position: ev.position };
+    this.q.insertScore.run(s.id, player.id, player.country, s.beatmap_id, s.pp, ev.ppGain, ev.weightedPP,
+      ev.position, endedAt, JSON.stringify(enriched));
+    this.recordBeatmap(s);
+    if (s.pp > 0 || ev.position >= 0) this.q.queueChart.run(s.beatmap_id, now);
+    const snipe = this.updateMapBest(player, s, endedAt, silent);
+    if (!silent) {
+      if (announceScore) this.emit('score', { country: player.country, score: enriched });
+      if (ev.position >= 0) this.emit('top_play', { country: player.country, score: enriched });
+      if (snipe) this.emit('snipe', { country: player.country, snipe });
+    }
+    if (endedAt > (player.last_score_at || 0)) {
+      this.q.markPolled.run(endedAt, player.id);
+      player.last_score_at = endedAt;
+    }
+    player.initialized = 1;
+    return enriched;
+  }
+
+  /** Poll one player's recent scores (ingest = "poll" mode). Returns the number of new scores. */
   async pollPlayer(player) {
-    const now = Date.now();
     const recent = await this.osu.recentScores(player.id, 50);
     const fresh = recent
       .filter((s) => s.passed !== false && !this.q.scoreExists.get(s.id))
       .sort((a, b) => Date.parse(a.ended_at) - Date.parse(b.ended_at));
     const silent = !player.initialized; // first poll = backfill, don't announce
-    let latest = 0;
-
-    for (const s of fresh) {
-      const endedAt = Date.parse(s.ended_at) || now;
-      latest = Math.max(latest, endedAt);
-      let ev = { position: -1, weightedPP: 0, ppGain: 0 };
-      if (!silent && s.pp > 0) {
-        const best = await this.ensureBest(player);
-        ev = evaluateScore(best, s);
-        if (ev.position >= 0) {
-          for (const b of mergeBest(best, s)) {
-            if (b.beatmap_id === s.beatmap_id) this.q.insertBest.run(player.id, s.beatmap_id, s.pp, s.accuracy, JSON.stringify(s.mods || []), endedAt);
-          }
-        }
-      }
-      const enriched = { ...s, pp_gain: ev.ppGain, weighted_pp: ev.weightedPP, best_position: ev.position };
-      this.q.insertScore.run(s.id, player.id, player.country, s.beatmap_id, s.pp, ev.ppGain, ev.weightedPP,
-        ev.position, endedAt, JSON.stringify(enriched));
-      this.recordBeatmap(s);
-      if (s.pp > 0 || ev.position >= 0) this.q.queueChart.run(s.beatmap_id, now);
-      const snipe = this.updateMapBest(player, s, endedAt, silent);
-      if (!silent) {
-        this.emit('score', { country: player.country, score: enriched });
-        if (ev.position >= 0) this.emit('top_play', { country: player.country, score: enriched });
-        if (snipe) this.emit('snipe', { country: player.country, snipe });
-      }
-    }
-    if (silent || latest > player.last_score_at) this.q.markPolled.run(latest, player.id);
+    for (const s of fresh) await this.processScore(player, s, { silent });
+    if (silent && !player.initialized) this.q.markPolled.run(0, player.id);
     player.initialized = 1;
-    player.last_score_at = Math.max(player.last_score_at || 0, latest);
     return fresh.length;
   }
 
@@ -342,6 +357,7 @@ export class Tracker extends EventEmitter {
       global_rank: s.global_rank ?? null, country_rank: s.country_rank ?? null, accuracy: s.accuracy ?? null,
       play_count: s.play_count ?? null, ranked_score: s.ranked_score ?? null,
     });
+    this.firehose?.focus.add(user.id);
     return true;
   }
 
@@ -405,6 +421,11 @@ export class Tracker extends EventEmitter {
       return 'leaderboard';
     }
     if (this.steps % this.config.analyzeEvery === 0 && (await this.analyzeNext())) return 'chart';
+    if (this.firehose) {
+      const did = await this.firehose.step();
+      if (did) return did;
+      return (await this.analyzeNext()) ? 'chart' : 'idle';
+    }
     if (!this.queue.length) this.buildQueue();
     const id = this.queue.shift();
     if (id === undefined) return (await this.analyzeNext()) ? 'chart' : 'idle';
@@ -633,6 +654,8 @@ export class Tracker extends EventEmitter {
       chartQueue: c(`SELECT COUNT(*) AS n FROM charts WHERE status = 'queued'`),
       snipes: c(`SELECT COUNT(*) AS n FROM snipes`),
       activeCountries: this.activeCountries(),
+      ingest: this.firehose ? 'firehose' : 'poll',
+      feed: this.firehose?.status() ?? null,
       apiRequests: this.osu.requestCount,
     };
   }

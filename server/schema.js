@@ -103,6 +103,15 @@ export const TABLES = {
     updated_at INTEGER NOT NULL,
     PRIMARY KEY (user_id, keys)
   )`,
+  country_activity: `CREATE TABLE IF NOT EXISTS country_activity (
+    country TEXT NOT NULL,
+    hour INTEGER NOT NULL,
+    plays INTEGER NOT NULL,
+    players INTEGER NOT NULL,
+    top_pp REAL,
+    top_json TEXT,
+    PRIMARY KEY (country, hour)
+  )`,
   follows: `CREATE TABLE IF NOT EXISTS follows (
     user_id INTEGER NOT NULL,
     target_id INTEGER NOT NULL,

@@ -37,7 +37,9 @@
     "ACTIVE_TTL_MINUTES": "30",
     "MAX_ACTIVE_COUNTRIES": "4",
     "ANALYZE_EVERY": "3",
-    "MAX_PINNED": "300"
+    "MAX_PINNED": "300",
+    "INGEST": "firehose",
+    "FEED_INTERVAL_SECONDS": "20"
   },
 
   "observability": { "enabled": true }

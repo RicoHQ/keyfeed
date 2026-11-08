@@ -33,7 +33,7 @@ export class MockOsuClient {
     this.activityScale = activityScale;
     this.perCountry = perCountry;
     this.requestCount = 0;
-    this.users = new Map();
+    this.users_ = new Map();
     this.byCountry = new Map();
     this.best = new Map();
     // time-based so ids stay unique across restarts (the DB outlives this object on Cloudflare)
@@ -81,7 +81,7 @@ export class MockOsuClient {
         favStyle: STYLES[Math.floor(r() * STYLES.length)],
       };
       list.push(u);
-      this.users.set(u.id, u);
+      this.users_.set(u.id, u);
     }
     this.byCountry.set(country, list);
     this.rerank();
@@ -89,7 +89,7 @@ export class MockOsuClient {
   }
 
   rerank() {
-    const all = [...this.users.values()].sort((a, b) => b.pp - a.pp);
+    const all = [...this.users_.values()].sort((a, b) => b.pp - a.pp);
     all.forEach((u, i) => (u.global_rank = i + 1));
     for (const list of this.byCountry.values()) [...list].sort((a, b) => b.pp - a.pp).forEach((u, i) => (u.country_rank = i + 1));
   }
@@ -105,7 +105,7 @@ export class MockOsuClient {
 
   async rankings(country, page = 1, variant = null) {
     await this.wait();
-    const pool = country ? this.ensureCountry(country) : [...this.users.values()];
+    const pool = country ? this.ensureCountry(country) : [...this.users_.values()];
     for (const u of pool) if (this.r() < 0.05) u.pp += Math.round(this.r() * 40);
     const key = variant === '4k' ? 'pp_4k' : variant === '7k' ? 'pp_7k' : 'pp';
     const list = [...pool].sort((a, b) => b[key] - a[key]);
@@ -156,7 +156,7 @@ export class MockOsuClient {
 
   async recentScores(userId) {
     await this.wait();
-    const u = this.users.get(Number(userId));
+    const u = this.users_.get(Number(userId));
     if (!u) return [];
     const out = [];
     if (this.r() < u.activity) out.push(this.makeScore(u));
@@ -172,7 +172,7 @@ export class MockOsuClient {
 
   async bestScores(userId) {
     await this.wait();
-    const u = this.users.get(Number(userId));
+    const u = this.users_.get(Number(userId));
     if (!u) return [];
     if (!this.best.has(u.id)) {
       const seen = new Set();
@@ -210,8 +210,8 @@ export class MockOsuClient {
   async user(idOrName) {
     await this.wait();
     const u = /^\d+$/.test(String(idOrName))
-      ? this.users.get(Number(idOrName))
-      : [...this.users.values()].find((x) => x.username.toLowerCase() === String(idOrName).toLowerCase());
+      ? this.users_.get(Number(idOrName))
+      : [...this.users_.values()].find((x) => x.username.toLowerCase() === String(idOrName).toLowerCase());
     return u ? this.profile(u) : null;
   }
 
@@ -228,6 +228,54 @@ export class MockOsuClient {
     if (!m) return null;
     const nps = (m.keys === 4 ? 3 : 4.2) + m.difficulty_rating * (m.keys === 4 ? 1.9 : 2.5);
     return makeOsu({ keys: m.keys, style: m.style, nps, seconds: 60 + (m.id % 5) * 25, seed: m.id, title: m.beatmapset.title, version: m.version });
+  }
+
+  /**
+   * Fake global score feed. Scores come from players in many countries (weighted toward big
+   * mania countries) and, like the worst case of the real feed, carry only user_id / beatmap_id:
+   * user country and beatmap details must be looked up with users() / beatmaps().
+   */
+  async scoresFeed(cursor = null) {
+    await this.wait();
+    if (!this.world) {
+      const big = ['US', 'KR', 'CN', 'JP', 'RU', 'BR', 'PH', 'ID', 'DE', 'PL', 'VN', 'CL', 'GB', 'FR', 'CA', 'TW', 'TH', 'MX', 'AR', 'AU'];
+      const small = ['CY', 'IL', 'FI', 'NL', 'ES', 'IT', 'SE', 'NO', 'NZ', 'SG', 'MY', 'HK', 'PE', 'UA', 'TR', 'PT'];
+      this.world = [...big.map((c) => [c, 3]), ...small.map((c) => [c, 1])];
+      this.worldWeight = this.world.reduce((n, [, w]) => n + w, 0);
+      this.feedClock = Date.now();
+    }
+    const now = Date.now();
+    const elapsed = cursor ? Math.min(120_000, now - this.feedClock) : 60_000;
+    this.feedClock = now;
+    const count = Math.max(1, Math.round((elapsed / 1000) * 2 * this.activityScale * (0.6 + this.r() * 0.8))); // ~2 scores/s at full scale
+    const out = [];
+    for (let i = 0; i < count; i++) {
+      let x = this.r() * this.worldWeight, country = this.world[0][0];
+      for (const [c, w] of this.world) { if ((x -= w) <= 0) { country = c; break; } }
+      const list = this.ensureCountry(country);
+      // top players play more often
+      const u = list[Math.min(list.length - 1, Math.floor(list.length * this.r() ** 2.2))];
+      const sc = this.makeScore(u);
+      sc.ended_at = new Date(now - Math.floor(this.r() * Math.min(elapsed, 30_000))).toISOString();
+      if (this.r() < 0.04) { sc.pp = Math.round(((sc.pp || 50) * 3 + 100) * 100) / 100; sc.total_score = Math.min(1000000, sc.total_score + 30000); }
+      delete sc.user; sc.beatmap = {}; sc.beatmapset = {};
+      out.push(sc);
+    }
+    out.sort((a, b) => Date.parse(a.ended_at) - Date.parse(b.ended_at));
+    return { scores: out, cursor: String(this.nextScoreId) };
+  }
+
+  async users(ids) {
+    await this.wait();
+    return ids.slice(0, 50).map((id) => this.users_.get(Number(id))).filter(Boolean).map((u) => this.lite(u));
+  }
+
+  async beatmaps(ids) {
+    await this.wait();
+    return ids.slice(0, 50).map((id) => this.mapById.get(Number(id))).filter(Boolean).map((m) => ({
+      id: m.id, set_id: m.beatmapset.id, title: m.beatmapset.title, artist: m.beatmapset.artist, version: m.version,
+      creator: m.beatmapset.creator, keys: m.keys, sr: m.difficulty_rating, bpm: m.bpm, status: 'ranked', cover: null, url: '#',
+    }));
   }
 
   /** Demo-mode sign-in: picks a tracked player so the logged-in UI can be tried without osu! OAuth. */

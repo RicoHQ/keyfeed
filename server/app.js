@@ -21,11 +21,12 @@ export function createApp({ tracker, osu, cfg }) {
     if (!clients.size) return;
     const frame = sseFrame(event, data);
     for (const c of clients) {
-      if (country && c.country !== country) continue;
+      if (country && c.country !== country && c.country !== 'WORLD') continue; // WORLD clients get everything
       try { c.controller.enqueue(frame); } catch { clients.delete(c); }
     }
   };
-  tracker.on('score', ({ country, score }) => broadcast('tracker_score', country, score));
+  tracker.on('score', ({ country, score }) => broadcast('tracker_score', country, score)); // poll mode
+  tracker.on('live', ({ country, score }) => broadcast('tracker_score', country || 'XX', score)); // global feed: every score
   tracker.on('top_play', ({ country, score }) => broadcast('top_play', country, score));
   tracker.on('snipe', ({ country, snipe }) => broadcast('snipe', country, snipe));
   tracker.on('rankings', ({ country }) => broadcast('rankings', country, { country }));
@@ -70,6 +71,7 @@ export function createApp({ tracker, osu, cfg }) {
     ['GET', /^\/api\/config$/, async ({ request }) => ({
       countries: cfg.countries, active: tracker.activeCountries(), mock: cfg.mock, rosterSize: cfg.rosterSize,
       onDemandRoster: cfg.onDemandRoster, loginAvailable: cfg.mock || !!cfg.osuClientId, me: await session(request),
+      ingest: tracker.firehose ? 'firehose' : 'poll',
       skillLabels: SKILL_LABELS,
     })],
     ['GET', /^\/api\/status$/, () => tracker.stats()],
@@ -96,13 +98,33 @@ export function createApp({ tracker, osu, cfg }) {
     ['GET', /^\/api\/tracker$/, ({ url }) => {
       const country = countryOf(url);
       if (!country) return [400, { error: 'bad_country' }];
-      return tracker.feed(country, num(url.searchParams.get('limit'), 30, 1, 100), num(url.searchParams.get('offset'), 0, 0, 1e6));
+      const limit = num(url.searchParams.get('limit'), 30, 1, 100);
+      const offset = num(url.searchParams.get('offset'), 0, 0, 1e6);
+      const stored = tracker.feed(country, limit + offset, 0);
+      if (!tracker.firehose) return { ...stored, scores: stored.scores.slice(offset, offset + limit) };
+      // global feed: every player from this country (memory) merged with tracked players' stored scores
+      const byId = new Map();
+      for (const x of tracker.firehose.live(country, 100)) byId.set(x.id, x);
+      for (const x of stored.scores) byId.set(x.id, x); // stored copy carries pp gain
+      const all = [...byId.values()].sort((a, b) => Date.parse(b.ended_at) - Date.parse(a.ended_at));
+      return { country, offset, total: Math.max(stored.total, all.length), scores: all.slice(offset, offset + limit) };
+    }],
+    ['GET', /^\/api\/world$/, ({ url }) => {
+      if (!tracker.firehose) return [404, { error: 'global_feed_disabled' }];
+      return { scores: tracker.firehose.live('WORLD', num(url.searchParams.get('limit'), 50, 1, 200)), countries: tracker.firehose.countries(), tracked: tracker.activeCountries() };
+    }],
+    ['GET', /^\/api\/countries\/live$/, () => {
+      if (!tracker.firehose) return [404, { error: 'global_feed_disabled' }];
+      return { countries: tracker.firehose.countries(), tracked: tracker.activeCountries() };
     }],
     ['GET', /^\/api\/top-plays$/, ({ url }) => {
       const country = countryOf(url);
       if (!country) return [400, { error: 'bad_country' }];
       const w = WINDOWS[url.searchParams.get('window')] ? url.searchParams.get('window') : '7d';
-      return { ...tracker.topPlays(country, WINDOWS[w], num(url.searchParams.get('limit'), 50, 1, 200)), window: w };
+      return {
+        ...tracker.topPlays(country, WINDOWS[w], num(url.searchParams.get('limit'), 50, 1, 200)), window: w,
+        highest: tracker.firehose ? tracker.firehose.topToday(country, 50) : [], // every player, last 24h
+      };
     }],
     ['GET', /^\/api\/snipes$/, ({ url }) => {
       const country = countryOf(url);
@@ -313,7 +335,7 @@ export function createApp({ tracker, osu, cfg }) {
     if (!path.startsWith('/api/')) return null;
 
     if (path === '/api/live' && request.method === 'GET') {
-      const country = countryOf(url);
+      const country = url.searchParams.get('country')?.toUpperCase() === 'WORLD' ? 'WORLD' : countryOf(url);
       if (!country) return json(400, { error: 'bad_country' });
       let client;
       const body = new ReadableStream({

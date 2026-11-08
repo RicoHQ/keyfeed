@@ -30,6 +30,7 @@ To track real players:
 - **Skill analyzer:** every chart gets per-skillset ratings (stream, jumpstream, handstream, jack, chordjack, tech, stamina, LN) and an estimated dan. Players get skillset ratings, a 4K / 7K dan and a daily skill history. See `/dan-estimates` on the site or `server/chart.js` and `server/skills.js`.
 - **Player pages:** 90-day global rank chart, pp history, key split, activity heatmap, tracked recents and best plays, with an accent colour taken from the avatar.
 - **osu! login:** sign in with osu! (OAuth). Signed-in users are tracked automatically and can follow players, who then get tracked too, and see a feed of their scores.
+- **Every country at once:** keyfeed reads osu!'s global feed of new mania scores (`GET /scores?ruleset=mania`, about 3 requests a minute). Every country gets a live feed, the day's highest-pp plays and activity counts (see `/world`). Rankings, pp gain, snipes, map leaderboards and history are kept for the tracked countries (below), signed-in users and followed players.
 - **Any country on demand:** pick any country and its top `ON_DEMAND_ROSTER` players are polled while someone is viewing it (up to `MAX_ACTIVE_COUNTRIES` at once).
 - **Social previews:** generated 1200×630 PNG cards and per-page Open Graph tags for players and maps.
 
@@ -47,7 +48,8 @@ osu! API v2 ──(token bucket, 60 req/min)──► Tracker ──► SQLite (
 ```
 
 - **Roster:** every `RANKINGS_REFRESH_MINUTES`, the tracker pulls the top `ROSTER_SIZE` players per country from `/rankings/mania/performance` and stores a daily snapshot. The ▲/▼ rank changes come from that snapshot.
-- **Polling:** it walks the roster calling `/users/{id}/scores/recent?mode=mania` and dedupes by score id. A player's first poll is a silent backfill. Players with a score in the last `HOT_WINDOW_MINUTES` are polled every cycle, and everyone else every `COLD_EVERY` cycles.
+- **Scores (default, `INGEST=firehose`):** every `FEED_INTERVAL_SECONDS` the tracker reads osu!'s global score feed with a cursor (up to 1,000 new scores per call). Users and beatmaps the feed doesn't embed are looked up 50 at a time and cached in memory. Every score goes to its country's in-memory live feed. Scores from tracked players also go through the full pipeline and are stored. See `server/firehose.js`.
+- **Scores (`INGEST=poll`):** the original mode. It walks the roster calling `/users/{id}/scores/recent?mode=mania` and dedupes by score id. Players with a score in the last `HOT_WINDOW_MINUTES` are polled every cycle, and everyone else every `COLD_EVERY` cycles. The global feed is lighter on the osu! API, which discourages polling every user every minute.
 - **pp gain:** for a new pp score, it loads the player's top 100 once (`/scores/best`) and recomputes `Σ pp·0.95^i` before and after. If the score lands in the top 100 it becomes a **top play** (`server/pp.js`).
 - **Budget:** at 60 req/min with 100 players, a full cold cycle takes about 2 minutes, and hot players are seen about every minute. For more countries, raise `COLD_EVERY` or lower `ROSTER_SIZE` rather than the request rate.
 
@@ -60,7 +62,8 @@ osu! API v2 ──(token bucket, 60 req/min)──► Tracker ──► SQLite (
 | `GET /api/tracker?country&limit&offset` | newest scores first |
 | `GET /api/top-plays?country&window=24h\|7d\|30d` | new top-100 plays by pp |
 | `GET /api/players/:idOrName` | profile, top 20 best scores and tracked recent scores (cached 5 min) |
-| `GET /api/live?country` | SSE events: `hello`, `tracker_score`, `top_play`, `rankings` |
+| `GET /api/live?country` | SSE events: `hello`, `tracker_score`, `top_play`, `snipe`, `rankings`. `country=WORLD` gets every country |
+| `GET /api/world`, `GET /api/countries/live` | worldwide live feed and per-country activity (global feed only) |
 | `GET /api/status` | counters |
 
 ## Deploy on Cloudflare
@@ -78,7 +81,7 @@ Code lives in `worker/index.js` and `wrangler.jsonc`. The tracker, API and SQL a
    For **osu! login**, set the OAuth app's *Application Callback URL* (osu! settings → OAuth) to `https://<your-worker>.workers.dev/api/auth/callback`.
 3. **Pick countries:** edit `vars` in `wrangler.jsonc` (`COUNTRIES`, `ROSTER_SIZE`, …) and push.
 
-**Free plan budget.** One always-on Durable Object at 128 MB uses about 11k of the 13k GB-s you get per day. Writes are kept low: one country with a 100-player roster comes to roughly 20k–30k of the 100k rows written per day. Each alarm run makes at most 40 osu! requests (the limit is 50 subrequests per invocation). For several large countries, use Workers Paid ($5/mo).
+**Free plan budget.** One always-on Durable Object at 128 MB uses about 11k of the 13k GB-s you get per day. To keep writes under 100k rows a day, the global feed keeps every country's live data in memory. Only tracked players' scores are written, plus one activity row per active country per hour (at most about 6k a day) and the feed cursor every 5 minutes. One tracked country with a 100-player roster comes to roughly 20k–30k rows a day. After a restart, the in-memory live feeds refill from the feed within a minute. Each alarm run makes at most 40 osu! requests (the limit is 50 subrequests per invocation). For several large countries, use Workers Paid ($5/mo).
 
 ## Deploy on a VPS (Node)
 

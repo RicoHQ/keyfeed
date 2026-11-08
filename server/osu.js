@@ -40,7 +40,11 @@ export class OsuClient {
   async get(path, params = {}, attempt = 0) {
     await this.limiter.take();
     const url = new URL(`${BASE}/api/v2${path}`);
-    for (const [k, v] of Object.entries(params)) if (v !== undefined && v !== null) url.searchParams.set(k, String(v));
+    for (const [k, v] of Object.entries(params)) {
+      if (v === undefined || v === null) continue;
+      if (Array.isArray(v)) for (const x of v) url.searchParams.append(k, String(x));
+      else url.searchParams.set(k, String(v));
+    }
     const res = await this.fetch(url, {
       headers: {
         Authorization: `Bearer ${await this.getToken()}`,
@@ -67,6 +71,29 @@ export class OsuClient {
   async rankings(country, page = 1, variant = null) {
     const body = await this.get('/rankings/mania/performance', { country: country || undefined, variant: variant || undefined, 'cursor[page]': page });
     return { ranking: (body?.ranking || []).map(normalizeStats), total: body?.total ?? 0 };
+  }
+
+  /**
+   * Global feed of passed osu!mania scores (charts with leaderboards only), oldest → newest,
+   * up to 1000 per call. Pass the previous cursor to get only what's new.
+   */
+  async scoresFeed(cursor = null) {
+    const body = await this.get('/scores', { ruleset: 'mania', cursor_string: cursor || undefined });
+    return { scores: (body?.scores || []).map(normalizeScore), cursor: body?.cursor_string ?? cursor };
+  }
+
+  /** Up to 50 users per call, with country. */
+  async users(ids) {
+    if (!ids.length) return [];
+    const body = await this.get('/users', { 'ids[]': ids.slice(0, 50) });
+    return (body?.users || []).map(normalizeUserLite);
+  }
+
+  /** Up to 50 beatmaps per call, with their beatmapset. */
+  async beatmaps(ids) {
+    if (!ids.length) return [];
+    const body = await this.get('/beatmaps', { 'ids[]': ids.slice(0, 50) });
+    return (body?.beatmaps || []).map(normalizeBeatmap);
   }
 
   /** Raw .osu file for a beatmap (used by the chart analyzer). */

@@ -35,6 +35,10 @@ export function makeConfig(env = {}, { autoMock = false } = {}) {
     analyzeEvery: int(env.ANALYZE_EVERY, 3),
     // Players tracked outside rosters (signed-in users and who they follow).
     maxPinned: int(env.MAX_PINNED, 300),
+    // "firehose": read osu!'s global feed of new mania scores (every country, ~1 request/min).
+    // "poll": poll each roster player's recent scores (the original mode).
+    ingest: env.INGEST === 'poll' ? 'poll' : 'firehose',
+    feedIntervalSeconds: int(env.FEED_INTERVAL_SECONDS, 20),
     // Signs login cookies. Falls back to a key derived from the osu! client secret.
     sessionSecret: env.SESSION_SECRET || '',
     // Public origin used for OAuth redirects and share links (defaults to the request's origin).
